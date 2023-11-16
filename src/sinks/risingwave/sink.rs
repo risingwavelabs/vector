@@ -1,51 +1,43 @@
-use tokio_postgres::{Client, NoTls};
+use codecs::encoding::Framer;
 
 use crate::sinks::prelude::*;
 
-use super::RisingWaveConfig;
+use super::{
+    batch::RisingWaveBatchSizer,
+    request_builder::request_builder,
+    service::{RisingWaveRetryLogic, RisingWaveService},
+};
 
 pub struct RisingWaveSink {
-    #[allow(unused)]
-    schema: Option<String>,
-
-    #[allow(unused)]
-    table: String,
-
-    #[allow(unused)]
-    client: Client,
+    pub transformer: Transformer,
+    pub encoder: Encoder<Framer>,
+    pub service: Svc<RisingWaveService, RisingWaveRetryLogic>,
+    pub batch_settings: BatcherSettings,
 }
 
 impl RisingWaveSink {
-    pub async fn new(config: &RisingWaveConfig) -> crate::Result<Self> {
-        let pg_config = config.create_pg_config();
+    async fn run_inner(self: Box<Self>, input: BoxStream<'_, Event>) -> Result<(), ()> {
+        let batcher_settings = self
+            .batch_settings
+            .into_item_size_config(RisingWaveBatchSizer {
+                encoder: self.encoder.clone(),
+            });
+        let transformer = self.transformer;
+        let mut encoder = self.encoder;
 
-        // Create a tokio_postgres client
-        let (client, connection) = pg_config.connect(NoTls).await?;
-        // The connection object performs the actual communication with the database,
-        // so spawn it off to run on its own.
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                eprintln!("postgres connection error: {}", e);
-            }
-        });
-
-        Ok(Self {
-            table: config.table.clone(),
-            schema: config.schema.clone(),
-            client,
-        })
+        input
+            .batched(batcher_settings)
+            .map(|events| request_builder(events, &transformer, &mut encoder))
+            .into_driver(self.service)
+            .protocol("risingwave")
+            .run()
+            .await
     }
 }
 
 #[async_trait::async_trait]
 impl StreamSink<Event> for RisingWaveSink {
-    async fn run(
-        self: Box<Self>,
-        mut input: futures_util::stream::BoxStream<'_, Event>,
-    ) -> Result<(), ()> {
-        while let Some(event) = input.next().await {
-            println!("{:?}", event);
-        }
-        todo!()
+    async fn run(self: Box<Self>, input: BoxStream<'_, Event>) -> Result<(), ()> {
+        self.run_inner(input).await
     }
 }

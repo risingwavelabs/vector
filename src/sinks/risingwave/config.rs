@@ -1,12 +1,18 @@
-use tokio_postgres::{Config, NoTls};
+use std::sync::Arc;
 
+use codecs::encoding::Framer;
+use tokio_postgres::tls::NoTlsStream;
+use tokio_postgres::{Client, Config, Connection, Socket};
+
+use crate::codecs::{EncodingConfigWithFraming, SinkType};
 use crate::sinks::prelude::*;
 
+use super::service::{RisingWaveRetryLogic, RisingWaveService};
 use super::sink::RisingWaveSink;
 
 /// Configuration for the `risingwave` sink.
 #[configurable_component(sink("risingwave", "Deliver log data to a RisingWave database."))]
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct RisingWaveConfig {
     /// The hostname or IP address of RisingWave.
@@ -39,6 +45,13 @@ pub struct RisingWaveConfig {
 
     #[configurable(derived)]
     #[serde(default)]
+    pub request: TowerRequestConfig,
+
+    #[serde(flatten)]
+    pub encoding: EncodingConfigWithFraming,
+
+    #[configurable(derived)]
+    #[serde(default)]
     pub(super) batch: BatchConfig<RisingWaveDefaultBatchSettings>,
 
     #[configurable(derived)]
@@ -68,14 +81,15 @@ impl RisingWaveConfig {
 
 impl GenerateConfig for RisingWaveConfig {
     fn generate_config() -> toml::Value {
-        let default = Self {
-            host: "localhost".to_string(),
-            port: 4566,
-            database: "dev".to_string(),
-            user: "root".to_string(),
-            ..Default::default()
-        };
-        toml::value::Value::try_from(default).unwrap()
+        toml::from_str(
+            r#"
+            host = "localhost"
+            port = 4566
+            database = dev
+            user = "root"
+            "#,
+        )
+        .unwrap()
     }
 }
 
@@ -83,10 +97,27 @@ impl GenerateConfig for RisingWaveConfig {
 #[typetag::serde(name = "risingwave")]
 impl SinkConfig for RisingWaveConfig {
     async fn build(&self, _cx: SinkContext) -> crate::Result<(VectorSink, Healthcheck)> {
-        let sink = RisingWaveSink::new(self).await?;
+        let request_settings = self.request.unwrap_with(&TowerRequestConfig::default());
+        let (service, connection) = RisingWaveService::try_new(self).await?;
+        let client = service.client.clone();
+
+        let service = ServiceBuilder::new()
+            .settings(request_settings, RisingWaveRetryLogic)
+            .service(service);
+
+        let transformer = self.encoding.transformer();
+        let (framer, serializer) = self.encoding.build(SinkType::MessageBased)?;
+        let encoder = Encoder::<Framer>::new(framer, serializer);
+
+        let sink = RisingWaveSink {
+            transformer,
+            encoder,
+            service,
+            batch_settings: self.batch.into_batcher_settings()?,
+        };
 
         // Healthcheck could be a simple query to the Risingwave database
-        let healthcheck = healthcheck(self.create_pg_config()).boxed();
+        let healthcheck = healthcheck(client, connection).boxed();
 
         Ok((VectorSink::from_event_streamsink(sink), healthcheck))
     }
@@ -101,15 +132,16 @@ impl SinkConfig for RisingWaveConfig {
     }
 }
 
-async fn healthcheck(pg_config: Config) -> crate::Result<()> {
-    // TODO: Reuse the connection and avoid reconnecting every health check.
-    let (client, connection) = pg_config.connect(NoTls).await?;
+async fn healthcheck(
+    client: Arc<Client>,
+    connection: Connection<Socket, NoTlsStream>,
+) -> crate::Result<()> {
     tokio::spawn(async move {
         if let Err(e) = connection.await {
             error!(?e, "postgres connection error");
         }
     });
-    let _ = client.simple_query("SELECT 1").await?;
+    _ = client.simple_query("SELECT 1").await?;
     Ok(())
 }
 
