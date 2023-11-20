@@ -10,8 +10,14 @@
 
 mod batch;
 mod config;
+
+#[cfg(test)]
+mod tests;
+
 #[cfg(all(test, feature = "risingwave-integration-tests"))]
+#[cfg(test)]
 mod integration_tests;
+
 mod request_builder;
 mod service;
 mod sink;

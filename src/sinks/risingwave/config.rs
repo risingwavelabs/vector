@@ -133,7 +133,7 @@ impl SinkConfig for RisingWaveConfig {
     }
 }
 
-async fn healthcheck(
+pub(crate) async fn healthcheck(
     client: Arc<Client>,
     connection: Connection<Socket, NoTlsStream>,
 ) -> crate::Result<()> {

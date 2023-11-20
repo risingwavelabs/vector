@@ -47,7 +47,7 @@ fn encode_events(
     }
 }
 
-fn encode_event(
+pub(crate) fn encode_event(
     mut event: Event,
     transformer: &Transformer,
     encoder: &mut Encoder<()>,
