@@ -1,13 +1,12 @@
 use vector_core::{
     event::Event, stream::batcher::limiter::ItemBatchSize, ByteSizeOf, EstimatedJsonEncodedSizeOf,
 };
-use codecs::encoding::Framer;
 
 use crate::codecs::Encoder;
 
 #[derive(Default)]
 pub(super) struct RisingWaveBatchSizer {
-    pub(super) encoder: Encoder<Framer>,
+    pub(super) encoder: Encoder<()>,
 }
 
 impl RisingWaveBatchSizer {

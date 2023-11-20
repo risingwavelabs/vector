@@ -1,5 +1,3 @@
-use codecs::encoding::Framer;
-
 use crate::sinks::prelude::*;
 
 use super::{
@@ -10,7 +8,7 @@ use super::{
 
 pub struct RisingWaveSink {
     pub transformer: Transformer,
-    pub encoder: Encoder<Framer>,
+    pub encoder: Encoder<()>,
     pub service: Svc<RisingWaveService, RisingWaveRetryLogic>,
     pub batch_settings: BatcherSettings,
 }

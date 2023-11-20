@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
-use codecs::encoding::Framer;
 use tokio_postgres::tls::NoTlsStream;
 use tokio_postgres::{Client, Config, Connection, Socket};
 
-use crate::codecs::{EncodingConfigWithFraming, SinkType};
+use crate::codecs::EncodingConfig;
 use crate::sinks::prelude::*;
 
 use super::service::{RisingWaveRetryLogic, RisingWaveService};
@@ -47,8 +46,8 @@ pub struct RisingWaveConfig {
     #[serde(default)]
     pub request: TowerRequestConfig,
 
-    #[serde(flatten)]
-    pub encoding: EncodingConfigWithFraming,
+    #[configurable(derived)]
+    pub encoding: EncodingConfig,
 
     #[configurable(derived)]
     #[serde(default)]
@@ -85,8 +84,10 @@ impl GenerateConfig for RisingWaveConfig {
             r#"
             host = "localhost"
             port = 4566
-            database = dev
+            database = "dev"
             user = "root"
+            table = "t"
+            encoding.codec = "json"
             "#,
         )
         .unwrap()
@@ -106,8 +107,8 @@ impl SinkConfig for RisingWaveConfig {
             .service(service);
 
         let transformer = self.encoding.transformer();
-        let (framer, serializer) = self.encoding.build(SinkType::MessageBased)?;
-        let encoder = Encoder::<Framer>::new(framer, serializer);
+        let serializer = self.encoding.build()?;
+        let encoder = Encoder::<()>::new(serializer);
 
         let sink = RisingWaveSink {
             transformer,

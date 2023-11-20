@@ -1,5 +1,4 @@
 use bytes::BytesMut;
-use codecs::encoding::Framer;
 use tokio_util::codec::Encoder as _;
 
 use crate::{
@@ -12,7 +11,7 @@ use super::service::{RisingWaveBody, RisingWaveRequest, RisingWaveRequestMetadat
 pub fn request_builder(
     mut events: Vec<Event>,
     transformer: &Transformer,
-    encoder: &mut Encoder<Framer>,
+    encoder: &mut Encoder<()>,
 ) -> RisingWaveRequest {
     let finalizers = events.take_finalizers();
     let builder = RequestMetadataBuilder::from_events(&events);
@@ -30,7 +29,7 @@ pub fn request_builder(
 fn encode_events(
     events: Vec<Event>,
     transformer: &Transformer,
-    encoder: &mut Encoder<Framer>,
+    encoder: &mut Encoder<()>,
 ) -> EncodeResult<Vec<RisingWaveBody>> {
     let mut byte_size = telemetry().create_request_count_byte_size();
     let request = events
@@ -51,7 +50,7 @@ fn encode_events(
 fn encode_event(
     mut event: Event,
     transformer: &Transformer,
-    encoder: &mut Encoder<Framer>,
+    encoder: &mut Encoder<()>,
     byte_size: &mut GroupedCountByteSize,
 ) -> Option<RisingWaveBody> {
     transformer.transform(&mut event);
