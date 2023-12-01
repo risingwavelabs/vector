@@ -8,8 +8,18 @@
 //!
 //! This sink currently supports logs and has the potential to support metrics and traces in the future.
 
+mod batch;
 mod config;
+
+#[cfg(test)]
+mod tests;
+
 #[cfg(all(test, feature = "risingwave-integration-tests"))]
+#[cfg(test)]
 mod integration_tests;
+
+mod request_builder;
+mod service;
 mod sink;
+
 pub use self::config::RisingWaveConfig;
