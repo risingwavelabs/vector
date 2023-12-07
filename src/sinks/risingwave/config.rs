@@ -124,8 +124,7 @@ impl SinkConfig for RisingWaveConfig {
     }
 
     fn input(&self) -> Input {
-        // TODO: Will support metrics in the future. https://github.com/risingwavelabs/vector/issues/1
-        Input::log()
+        Input::all()
     }
 
     fn acknowledgements(&self) -> &AcknowledgementsConfig {
