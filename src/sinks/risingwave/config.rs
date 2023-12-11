@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
-use tokio_postgres::tls::NoTlsStream;
-use tokio_postgres::{Client, Config, Connection, Socket};
+use tokio_postgres::{Client, Config};
 
 use crate::codecs::EncodingConfig;
 use crate::sinks::prelude::*;
@@ -99,8 +98,8 @@ impl GenerateConfig for RisingWaveConfig {
 impl SinkConfig for RisingWaveConfig {
     async fn build(&self, _cx: SinkContext) -> crate::Result<(VectorSink, Healthcheck)> {
         let request_settings = self.request.unwrap_with(&TowerRequestConfig::default());
-        let (service, connection) = RisingWaveService::try_new(self).await?;
-        let client = service.client.clone();
+        let service = RisingWaveService::try_new(self).await?;
+        let client = Arc::clone(&service.client);
 
         let service = ServiceBuilder::new()
             .settings(request_settings, RisingWaveRetryLogic)
@@ -118,7 +117,7 @@ impl SinkConfig for RisingWaveConfig {
         };
 
         // Healthcheck could be a simple query to the Risingwave database
-        let healthcheck = healthcheck(client, connection).boxed();
+        let healthcheck = healthcheck(client).boxed();
 
         Ok((VectorSink::from_event_streamsink(sink), healthcheck))
     }
@@ -132,15 +131,7 @@ impl SinkConfig for RisingWaveConfig {
     }
 }
 
-pub(crate) async fn healthcheck(
-    client: Arc<Client>,
-    connection: Connection<Socket, NoTlsStream>,
-) -> crate::Result<()> {
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            error!(?e, "postgres connection error");
-        }
-    });
+pub(crate) async fn healthcheck(client: Arc<Client>) -> crate::Result<()> {
     _ = client.simple_query("SELECT 1").await?;
     Ok(())
 }

@@ -2,9 +2,7 @@ use std::{sync::Arc, task::Poll};
 
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
-use tokio_postgres::{
-    tls::NoTlsStream, Client, Connection, Error as RisingWaveError, NoTls, Socket,
-};
+use tokio_postgres::{Client, Error as RisingWaveError, NoTls};
 use tower::Service;
 use vector_common::{
     config::ComponentKey,
@@ -93,21 +91,28 @@ pub struct RisingWaveService {
 }
 
 impl RisingWaveService {
-    pub async fn try_new(
-        config: &RisingWaveConfig,
-    ) -> crate::Result<(Self, Connection<Socket, NoTlsStream>)> {
+    pub async fn try_new(config: &RisingWaveConfig) -> crate::Result<Self> {
         let pg_config = config.create_pg_config();
 
         let (client, connection) = pg_config.connect(NoTls).await?;
 
-        Ok((
-            Self {
-                schema: config.schema.clone(),
-                table: config.table.clone(),
-                client: Arc::new(client),
-            },
-            connection,
-        ))
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                error!(?e, "postgres connection error");
+            }
+        });
+
+        let client = Arc::new(client);
+
+        if let Err(e) = create_table(Arc::clone(&client), &config.table).await {
+            error!(?e, "postgres client execute error");
+        }
+
+        Ok(Self {
+            schema: config.schema.clone(),
+            table: config.table.clone(),
+            client,
+        })
     }
 }
 
@@ -154,4 +159,20 @@ impl Service<RisingWaveRequest> for RisingWaveService {
             })
         })
     }
+}
+
+async fn create_table(client: Arc<Client>, table: &str) -> crate::Result<()> {
+    // RisingWave table schema
+    let create_table = format!(
+        "CREATE TABLE IF NOT EXISTS {} (
+           source_id VARCHAR,
+           data_type VARCHAR,
+           value BYTEA
+         );",
+        table
+    );
+
+    client.simple_query(&create_table).await?;
+
+    Ok(())
 }
